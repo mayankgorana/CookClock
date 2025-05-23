@@ -1,0 +1,35 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="#FFF1DB">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Welcome to CookClock"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:paddingBottom="16dp"
+        android:textColor="#333333"
+        />
+
+    <EditText
+        android:id="@+id/editTextName"
+        android:layout_width="280dp"
+        android:layout_height="wrap_content"
+        android:hint="Enter your name"
+        android:gravity="center" />
+
+    <Button
+        android:id="@+id/btnContinue"
+        android:layout_width="280dp"
+        android:layout_height="wrap_content"
+        android:text="Continue"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/rounded_button_bg"
+        android:textColor="#FFFFFF"
+        />
+</LinearLayout>

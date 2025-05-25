@@ -1,24 +1,21 @@
 package com.example.cookclock;
 
-import android.Manifest;
 import android.content.Context;
-import android.content.SharedPreferences;
-import android.media.AudioManager;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.MediaPlayer;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
-import android.os.VibrationEffect;
-import android.os.Vibrator;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.annotation.RequiresPermission;
 import androidx.appcompat.app.AppCompatActivity;
 
-public class TimerActivity extends AppCompatActivity {
+public class TimerActivity extends AppCompatActivity implements SensorEventListener {
 
     TextView timerLabel, timerCountdown;
     Button startBtn, pauseBtn, resumeBtn, cancelBtn;
@@ -26,6 +23,12 @@ public class TimerActivity extends AppCompatActivity {
     long remainingTime;
     boolean isPaused = false;
     MediaPlayer alertSound;
+
+    // Sensor related
+    private SensorManager sensorManager;
+    private Sensor accelerometer;
+    private static final float SHAKE_THRESHOLD = 12.0f;
+    private long lastShakeTime = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,34 +60,24 @@ public class TimerActivity extends AppCompatActivity {
         });
 
         pauseBtn.setOnClickListener(v -> {
-            if (!isPaused && countDownTimer != null) {
-                countDownTimer.cancel();
-                isPaused = true;
-                pauseBtn.setVisibility(View.GONE);
-                resumeBtn.setVisibility(View.VISIBLE);
-            }
+            pauseTimer();
         });
 
         resumeBtn.setOnClickListener(v -> {
-            if (isPaused) {
-                startTimer(remainingTime);
-                isPaused = false;
-                resumeBtn.setVisibility(View.GONE);
-                pauseBtn.setVisibility(View.VISIBLE);
-            }
+            resumeTimer();
         });
 
         cancelBtn.setOnClickListener(v -> {
-            if (countDownTimer != null) countDownTimer.cancel();
-            if (alertSound != null) alertSound.release();
-            finish();
+            if (countDownTimer != null) {
+                countDownTimer.cancel();
+            }
+            finish(); // close activity or reset UI as needed
         });
 
-        // OPTIONAL: Set media volume to max for testing
-        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        if (audioManager != null) {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,
-                    audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+        // Setup sensor manager and accelerometer
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if(sensorManager != null) {
+            accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         }
     }
 
@@ -92,51 +85,92 @@ public class TimerActivity extends AppCompatActivity {
         countDownTimer = new CountDownTimer(timeInMillis, 1000) {
             public void onTick(long millisUntilFinished) {
                 remainingTime = millisUntilFinished;
-                timerCountdown.setText(String.format("%02d:%02d",
-                        (millisUntilFinished / 60000),
-                        (millisUntilFinished % 60000) / 1000));
+                int minutes = (int) (millisUntilFinished / 1000) / 60;
+                int seconds = (int) (millisUntilFinished / 1000) % 60;
+                timerCountdown.setText(String.format("%02d:%02d", minutes, seconds));
             }
 
-            @RequiresPermission(Manifest.permission.VIBRATE)
             public void onFinish() {
-                playAlertSound();
-                vibratePhone();
-
-                Toast.makeText(TimerActivity.this, "Timer Finished!", Toast.LENGTH_SHORT).show();
-                saveToHistory(timerLabel.getText().toString());
-                finish();
+                timerCountdown.setText("00:00");
+                Toast.makeText(TimerActivity.this, "Time's up!", Toast.LENGTH_SHORT).show();
+                // play sound or vibrate here if needed
             }
         }.start();
+        isPaused = false;
+        pauseBtn.setVisibility(View.VISIBLE);
+        resumeBtn.setVisibility(View.GONE);
     }
 
-    private void playAlertSound() {
-        alertSound = MediaPlayer.create(this, R.raw.alert);
-        if (alertSound != null) {
-            alertSound.setOnCompletionListener(mp -> {
-                mp.release(); // release MediaPlayer when done
-            });
-            alertSound.start();
-        } else {
-            Toast.makeText(this, "Failed to play alert sound", Toast.LENGTH_SHORT).show();
+    private void pauseTimer() {
+        if (!isPaused && countDownTimer != null) {
+            countDownTimer.cancel();
+            isPaused = true;
+            pauseBtn.setVisibility(View.GONE);
+            resumeBtn.setVisibility(View.VISIBLE);
+            Toast.makeText(this, "▶\uFE0F Timer paused", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void vibratePhone() {
-        Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-        if (vibrator != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE));
-            } else {
-                vibrator.vibrate(500);
+    private void resumeTimer() {
+        if (isPaused) {
+            startTimer(remainingTime);
+            Toast.makeText(this, "⏸\uFE0F Timer resumed", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // Register sensor listener on resume
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (accelerometer != null) {
+            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_UI);
+        }
+    }
+
+    // Unregister sensor listener on pause
+    @Override
+    protected void onPause() {
+        super.onPause();
+        sensorManager.unregisterListener(this);
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
+    }
+
+    // Shake detection logic
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            float x = event.values[0];
+            float y = event.values[1];
+            float z = event.values[2];
+
+            // Calculate acceleration magnitude (removing gravity approx.)
+            double acceleration = Math.sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH;
+
+            if (acceleration > SHAKE_THRESHOLD) {
+                long now = System.currentTimeMillis();
+                // Prevent multiple shakes in quick succession (500ms)
+                if (now - lastShakeTime > 500) {
+                    lastShakeTime = now;
+                    onShake();
+                }
             }
         }
     }
 
-    private void saveToHistory(String label) {
-        SharedPreferences prefs = getSharedPreferences("TIMER_HISTORY", MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        String existing = prefs.getString("HISTORY", "");
-        editor.putString("HISTORY", existing + label + " - Done\n");
-        editor.apply();
+    private void onShake() {
+        // If timer running => pause
+        // If paused => resume
+        if (!isPaused && countDownTimer != null) {
+            pauseTimer();
+        } else if (isPaused) {
+            resumeTimer();
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        // Not used
     }
 }
